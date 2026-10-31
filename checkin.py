@@ -278,6 +278,21 @@ def _send_webhook(url: str, title: str, body: str, results: list[AccountResult])
 # --------------------------------------------------------------------- 入口
 
 
+def emit_annotations(results: list[AccountResult]) -> None:
+    """在 GitHub Actions 里把失败原因写成 annotation。
+
+    公开仓库不登录也能从 checks API / 页面看到这条消息，排查不用翻日志。
+    """
+    if os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
+        return
+    for result in results:
+        if not result.error:
+            continue
+        message = " ".join(str(result.error).split())
+        mode = result.login_mode or "未知"
+        print(f"::error title={result.label}::账号 {result.index + 1}（{mode}）：{message}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="天翼云盘自动签到 + 抽奖")
     parser.add_argument("--check", action="store_true", help="只验证登录，不签到")
@@ -315,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     report = render_report(results, args.check)
     print(f"\n{report}\n")
     write_step_summary(report)
+    emit_annotations(results)
 
     if not args.no_notify:
         notify(config, results, args.check)
