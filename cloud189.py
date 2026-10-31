@@ -23,12 +23,34 @@ sessionKey（缺失时返回 InvalidSessionKey / 302 跳登录页）。
 
 from __future__ import annotations
 
+import os
 import re
+import socket
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+
+
+def _prefer_ipv4() -> None:
+    """优先走 IPv4。
+
+    GitHub Actions / 部分云主机没有 IPv6 路由，但 DNS 会返回 AAAA，requests
+    先连 IPv6 就会抛 [Errno 101] Network is unreachable。
+    189 的域名都有 IPv4，强制 IPv4 更稳；需要 IPv6 时设 PREFER_IPV6=1。
+    """
+    if os.environ.get("PREFER_IPV6", "").strip().lower() in ("1", "true", "yes", "on"):
+        return
+    try:
+        from urllib3.util import connection as _connection
+
+        _connection.allowed_gai_family = lambda: socket.AF_INET
+    except Exception:  # pragma: no cover - 依赖异常时退回系统默认
+        pass
+
+
+_prefer_ipv4()
 
 WEB_URL = "https://cloud.189.cn"
 AUTH_URL = "https://open.e.189.cn"
@@ -159,6 +181,9 @@ class Cloud189Client:
         self.access_token = ""
         self.account = ""
         self.login_mode = ""
+        # 浏览器 Cookie 可以直接当 web 会话用（服务端叫 cookieUserSession），
+        # 这种模式下不需要 sessionKey，签到接口也能正常工作。
+        self.cookie_only = False
 
         if self.cookie:
             self._load_cookie_string(self.cookie)
@@ -167,6 +192,13 @@ class Cloud189Client:
 
     def login(self) -> str:
         """完成登录并拿到 sessionKey；返回登录方式（cookie/sson/password）。"""
+        placeholder = self._placeholder_cookie()
+        if placeholder:
+            raise AuthError(
+                f"检测到 {placeholder} 的值里有 ***，这是命令行里的打码预览，不是完整 Cookie。"
+                "请重新运行 get_cookie 复制完整的那一行，"
+                "或从脚本保存的 cookie_COOKIE_189.txt 里复制。"
+            )
         if self.cookie:
             self.login_mode = "cookie"
             self._login_with_cookie()
@@ -181,20 +213,66 @@ class Cloud189Client:
         return self.login_mode
 
     def _login_with_cookie(self) -> None:
-        # 浏览器 Cookie 里通常已经带有用户会话，直接换 sessionKey 即可。
+        # 浏览器 Cookie 可能直接能换 sessionKey；换不到也不代表 Cookie 无效：
+        # 189 的 web 接口（签到等）认的是 cookieUserSession，纯 Cookie 就能用。
+        detail = ""
         try:
             self._get_session_for_pc()
             return
         except Cloud189Error as exc:
-            # 浏览器 Cookie 可能只带了 SSON，或会话已过期，走一次 SSO 握手。
-            self._debug(f"直接用 Cookie 换 sessionKey 失败：{exc}，尝试 SSO 握手")
+            detail = str(exc)
+            self._debug(f"直接用 Cookie 换 sessionKey 失败（{exc}），继续尝试其它方式")
+
         sson = self._cookie_value("SSON")
-        if not sson:
+        if sson:
+            try:
+                self._login_with_sson()
+                return
+            except Exception as exc:  # noqa: BLE001 - SSO 只是加分项
+                self._debug(f"SSO 握手失败：{exc}")
+
+        try:
+            self._verify_web_cookie()
+        except Cloud189Error as exc:
+            extra = f"；sessionKey 接口返回：{detail}" if detail else ""
             raise AuthError(
-                "Cookie 无法换取 sessionKey（多半是会话已过期）。"
-                "请重新从浏览器复制 cloud.189.cn 的 Cookie，确认包含 COOKIE_LOGIN_USER。"
+                f"Cookie 没有有效登录态（{exc}{extra}；{self._cookie_summary()}）。"
+                "请重新获取 Cookie，确认粘贴的是登录后的完整一行。"
             )
-        self._login_with_sson()
+        self.session_key = ""
+        self.cookie_only = True
+        self._debug("浏览器 Cookie 可以直接作为 web 会话使用，跳过 sessionKey")
+
+    def _verify_web_cookie(self) -> dict:
+        """用 web 接口确认 Cookie 真的处于登录态（cookieUserSession 有效）。"""
+        resp = self.session.get(
+            f"{WEB_URL}/api/portal/getUserSizeInfo.action",
+            params={"noCache": int(time.time() * 1000)},
+            timeout=self.timeout,
+        )
+        self._raise_for_status(resp)
+        payload = self._json_or_raise(resp, "getUserSizeInfo")
+        if isinstance(payload, dict) and payload.get("errorCode"):
+            raise Cloud189Error(
+                f"Cookie 会话无效：{payload.get('errorMsg') or payload.get('errorCode')}",
+                code=str(payload.get("errorCode")),
+            )
+        return payload
+
+    def _placeholder_cookie(self) -> str:
+        """找出值里带 *** 的 Cookie（用户误把打码预览填进来）。"""
+        for cookie in self.session.cookies:
+            if "***" in (cookie.value or ""):
+                return cookie.name
+        return ""
+
+    def _cookie_summary(self) -> str:
+        parts = [f"共 {len(list(self.session.cookies))} 项"]
+        for name in ("COOKIE_LOGIN_USER", "COOKIE_LOGIN_USER_SSO", "SSON"):
+            value = self._cookie_value(name)
+            if value:
+                parts.append(f"{name} 长度 {len(value)}")
+        return "，".join(parts)
 
     def _login_with_sson(self, sson: str = "") -> None:
         sson = sson or self.sson or self._cookie_value("SSON")
@@ -322,8 +400,12 @@ class Cloud189Client:
         if access_token:
             params["accessToken"] = access_token
 
+        # 两个不同的 getSessionForPC：
+        # * 浏览器 Cookie 直接换会话 → cloud.189.cn/api/portal（读 cookieUserSession）
+        # * 口令 / SSO / 扫码拿到 redirectURL 或 accessToken → api.cloud.189.cn
+        base = WEB_URL + "/api/portal" if not (redirect_url or access_token) else API_URL
         resp = self.session.post(
-            f"{API_URL}/getSessionForPC.action", params=params, timeout=self.timeout
+            f"{base}/getSessionForPC.action", params=params, timeout=self.timeout
         )
         self._raise_for_status(resp)
         payload = self._json_or_raise(resp, "getSessionForPC")
@@ -341,6 +423,8 @@ class Cloud189Client:
         # 服务端可能在这次响应里补种 Cookie，requests 已自动收下。
 
     def _relogin(self) -> None:
+        if self.cookie_only:
+            raise SessionExpired("浏览器 Cookie 会话已失效，请重新获取 COOKIE_189")
         self.session_key = ""
         if self.login_mode == "cookie" and self.cookie:
             self._login_with_cookie()
@@ -362,7 +446,7 @@ class Cloud189Client:
 
     def sign_in(self) -> SignResult:
         payload = self._request_json(
-            f"{WEB_URL}/mkt/userSign.action",
+            f"{WEB_URL}/api/mkt/userSign.action",
             params={
                 "rand": int(time.time() * 1000),
                 "clientType": API_CLIENT_TYPE,
@@ -411,11 +495,12 @@ class Cloud189Client:
         is_draw: bool = False,
         _retry: bool = True,
     ) -> dict:
-        if not self.session_key:
+        if not self.session_key and not self.cookie_only:
             self._relogin()
 
         query = dict(params or {})
-        query["sessionKey"] = self.session_key
+        if self.session_key:
+            query["sessionKey"] = self.session_key
 
         request_headers = {
             "User-Agent": MOBILE_UA if mobile else PC_UA,
@@ -434,6 +519,8 @@ class Cloud189Client:
 
         # 302 / HTML 登录页 = 会话失效
         if resp.status_code in (301, 302, 303, 307):
+            if self.cookie_only:
+                raise SessionExpired("接口跳转到登录页，Cookie 会话已失效，请重新获取 COOKIE_189")
             if _retry:
                 self._debug("会话失效（重定向到登录），重新登录后重试")
                 self._relogin()
@@ -466,7 +553,7 @@ class Cloud189Client:
                 "TimeOut",
                 "InvalidAccessToken",
             )
-            if transient and _retry:
+            if transient and _retry and not self.cookie_only:
                 self._debug(f"{code}（{message}），重新登录后重试")
                 self._relogin()
                 return self._request_json(
@@ -508,8 +595,12 @@ class Cloud189Client:
         except ValueError as exc:
             body = resp.text[:300].replace("\n", " ")
             if "<error" in body:
-                raise Cloud189Error(f"{where} 返回错误：{body}") from exc
-            raise Cloud189Error(f"{where} 返回非 JSON：{body}") from exc
+                raise Cloud189Error(f"{where} 返回错误（HTTP {resp.status_code}）：{body}") from exc
+            if "<html" in body.lower():
+                raise Cloud189Error(
+                    f"{where} 返回登录页 HTML（HTTP {resp.status_code}）：{body}"
+                ) from exc
+            raise Cloud189Error(f"{where} 返回非 JSON（HTTP {resp.status_code}）：{body}") from exc
         return payload if isinstance(payload, dict) else {"data": payload}
 
     # ------------------------------------------------------------- Cookie 助手

@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | CI 直接红叉 | `setup-python@v2` + Python 3.7，在 `ubuntu-latest`(24.04) 上装不上 | `setup-python@v7` + Python 3.13，带 pip 缓存 |
 | 登录链路 | `udb_login.jsp` + 手搓 RSA，页面已 301 跳走 | 现行链路：`unifyLoginForPC` → `encryptConf` → `loginSubmit` → `getSessionForPC` |
-| 接口鉴权 | 只靠 Cookie，缺 `sessionKey`，签到接口返回 `date/signature is null` | 登录后取 `sessionKey`，所有 `cloud.189.cn` 请求都带上 |
+| 接口鉴权 | 只靠 Cookie，缺 `sessionKey`，签到接口返回 `date/signature is null` | 两条路：能换到 `sessionKey` 就带上；换不到就让浏览器 Cookie 直接当 web 会话（`cookieUserSession`），签到接口本身也认它 |
 | 失效后被当成成功 | 302/HTML 只打印一句就继续 | 识别 302/HTML/`InvalidSessionKey`，自动重新登录重试一次，仍失败则明确报错 |
 | 账号密码 | 用 heredoc 从 stdin 喂，多个账号循环同一脚本 | 环境变量直读，多账号互不干扰，单账号异常不影响其他账号 |
 | 通知 | 写死了一个 Server 酱 `SCU...` key（已泄露） | 改成可选 `SERVERCHAN_SENDKEY` 密钥，密钥再没进过代码 |
@@ -208,6 +208,8 @@ build_exe.bat
 | --- | --- | --- |
 | `没有配置任何账号` | 三个 secret 都没设 | 至少配 `COOKIE_189` |
 | `登录失败：凭证已失效` / `InvalidSessionKey` | Cookie 过期 | 重新跑 `get_cookie` 取一份 |
+| `Cookie 没有有效登录态…cookieUserSession is null or invalid` | Cookie 不是登录后的完整会话（过期、只复制了一部分、或填了带 `***` 的预览） | 重新跑 `get_cookie`（它会先校验再复制），确认整行粘贴 |
+| `Network is unreachable`（`open.e.189.cn`） | GitHub Actions 出口到登录域不通（常见于 IPv6 无路由或被拦截） | 脚本已默认强制 IPv4；口令登录在 CI 里本来就不可靠，直接改用 `COOKIE_189` |
 | `接口返回登录页（HTML）` | 同上，服务端直接跳登录页 | 同上 |
 | `登录失败：请输入验证码…` | 口令登录被验证码拦截 | 改用 `COOKIE_189` |
 | `登录失败：账户名或密码错误` | 密码确实不对，或天翼云盘已不再接受该账号的网页口令登录 | 先去官网确认密码能不能登网页；能登也报错就直接上 `COOKIE_189` |

@@ -25,6 +25,12 @@ from dataclasses import dataclass, field
 
 import requests
 
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except Exception:  # pragma: no cover - 非标准输出（如被重定向）时忽略
+        pass
+
 from cloud189 import (
     TASK_SIGNIN,
     TASK_SIGNIN_PHOTOS,

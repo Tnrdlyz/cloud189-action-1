@@ -41,7 +41,13 @@ import time
 import urllib.request
 from pathlib import Path
 
-__version__ = "1.0.0"
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except Exception:  # pragma: no cover - 输出被重定向/包裹时忽略
+        pass
+
+__version__ = "1.1.0"
 
 WEB_MAIN = "https://cloud.189.cn/web/main"
 LOGIN_COOKIE_NAMES = ("COOKIE_LOGIN_USER", "COOKIE_LOGIN_USER_SSO")

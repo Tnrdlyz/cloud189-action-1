@@ -87,6 +87,66 @@ class HelperTests(unittest.TestCase):
         self.assertIn("100M", SignResult(is_sign=False, bonus_mb=100).text)
 
 
+class CookieSessionEndpointTests(unittest.TestCase):
+    """Cookie 换 sessionKey 必须走 web 门户接口，不能走 api.cloud.189.cn。"""
+
+    def test_cookie_login_uses_web_portal_endpoint(self):
+        client = make_client(FakeResponse(payload={"sessionKey": "sk"}))
+        self.assertEqual(client.login(), "cookie")
+        method, url, _ = client.session.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(url, "https://cloud.189.cn/api/portal/getSessionForPC.action")
+
+    def test_redirect_exchange_uses_api_endpoint(self):
+        client = make_client(FakeResponse(payload={"sessionKey": "sk"}))
+        client._get_session_for_pc(redirect_url="https://cloud.189.cn/web/redirect.html?x=1")
+        _, url, _ = client.session.calls[0]
+        self.assertTrue(url.startswith("https://api.cloud.189.cn/getSessionForPC.action"), url)
+
+    def test_masked_cookie_is_rejected_early(self):
+        client = Cloud189Client(cookie="COOKIE_LOGIN_USER=2F1***95; COOKIE_LOGIN_USER_SSO=abc")
+        with self.assertRaises(AuthError) as ctx:
+            client.login()
+        self.assertIn("打码预览", str(ctx.exception))
+
+
+class CookieOnlyModeTests(unittest.TestCase):
+    """拿不到 sessionKey 时，浏览器 Cookie 直接当 web 会话用。"""
+
+    @staticmethod
+    def _client(responses):
+        client = Cloud189Client(cookie="COOKIE_LOGIN_USER=abc")
+        client.session = FakeSession(responses)
+        client._load_cookie_string(client.cookie)
+        return client
+
+    def test_fallback_to_cookie_only(self):
+        client = self._client(
+            [
+                FakeResponse(
+                    status_code=400,
+                    payload={"errorCode": "InvalidSessionKey", "errorMsg": "cookieUserSession is null or invalid"},
+                ),
+                FakeResponse(payload={"userId": "1"}),
+            ]
+        )
+        self.assertEqual(client.login(), "cookie")
+        self.assertTrue(client.cookie_only)
+        self.assertEqual(client.session_key, "")
+        self.assertIn("getUserSizeInfo", client.session.calls[1][1])
+
+    def test_cookie_only_sign_has_no_session_key(self):
+        client = self._client([])
+        client.cookie_only = True
+        client.login_mode = "cookie"
+        client.session = FakeSession([FakeResponse(payload={"isSign": "true", "netdiskBonus": "100"})])
+        result = client.sign_in()
+        self.assertTrue(result.is_sign)
+        _, url, kwargs = client.session.calls[0]
+        self.assertIn("/api/mkt/userSign.action", url)
+        self.assertNotIn("sessionKey", kwargs["params"])
+
+
 class AccountSplitTests(unittest.TestCase):
     def test_split_by_newline(self):
         self.assertEqual(checkin.split_accounts("a\nb\n\n c "), ["a", "b", "c"])
