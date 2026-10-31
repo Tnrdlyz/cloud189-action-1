@@ -6,57 +6,73 @@ on:
   pull_request:
     branches: [ master ]
   schedule:
-    - cron: '0 22,14 * * *'
+    # 每天 06:00 / 22:00（北京时间）。UTC 14:00 = 北京 22:00，UTC 22:00 = 北京 06:00
+    - cron: '0 14,22 * * *'
+  workflow_dispatch:
+    inputs:
+      check:
+        description: '只验证登录、不签到（排查凭证用）'
+        type: boolean
+        default: false
+      debug:
+        description: '打印请求细节'
+        type: boolean
+        default: false
   watch:
-    types: started
+    types: [ started ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checkin-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-    - uses: actions/checkout@v2
-    - name: 初始化Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.7
-    - name: 签到
-      run: |
-        pip install -r requirements.txt
-        
-        user='${{ secrets.USER }}'
-        pwd='${{ secrets.PWD }}'
-        
-        user_list=()
-        pwd_list=()
+      - name: 检出代码
+        uses: actions/checkout@v7
 
-        IFS="#"
+      - name: 初始化 Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
 
-        for u in ${user[*]}
-        do
-        user_list[${#user_list[*]}]=${u}
-        done
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-        for p in ${pwd[*]}
-        do
-        pwd_list[${#pwd_list[*]}]=${p}
-        done
+      - name: 离线单测
+        run: python -m unittest discover -s tests -v
 
-        user_num=${#user_list[*]}
-        pwd_num=${#pwd_list[*]}
+      - name: 签到
+        env:
+          # 推荐：浏览器里 cloud.189.cn 的整条 Cookie
+          COOKIE_189: ${{ secrets.COOKIE_189 }}
+          # 可选：open.e.189.cn 的 SSON Cookie
+          SSON: ${{ secrets.SSON }}
+          # 兼容老配置：账号 / 密码，多个账号用 # 分隔
+          USER: ${{ secrets.USER }}
+          PWD: ${{ secrets.PWD }}
+          # 通知（都可选）
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+          NOTIFY_WEBHOOK: ${{ secrets.NOTIFY_WEBHOOK }}
+          DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || '' }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.check }}" = "true" ]; then
+            python checkin.py --check --no-notify
+          else
+            python checkin.py
+          fi
 
-        if [ $user_num != $pwd_num ];then
-        echo "账号和密码个数不对应"
-        exit 1
-        else
-        echo "共有 $user_num 个账号，即将开始签到"
-        fi
-
-        for ((i=0;i<$user_num;i++))
-        do
-        python3 checkin.py <<EOF
-        ${user_list[$i]}
-        ${pwd_list[$i]}
-        EOF
-        done
+      - name: 汇总
+        if: always()
+        run: echo "详见本页 Summary（右上角）与上方步骤日志"
