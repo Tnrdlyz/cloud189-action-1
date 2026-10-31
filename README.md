@@ -70,6 +70,9 @@ python get_cookie.py --profile "%USERPROFILE%\.cloud189-cookie\account2"
 >    Cookie 的 IP 绑定就不会冲突。
 >
 > 本地跑（自己的电脑）用 `COOKIE_189` 没问题，绑定的就是本机 IP。
+>
+> **只保留一种凭证。** 如果同时配了 `COOKIE_189`、`SSON`、`USER/PWD`，脚本会把它们当成
+> 三个不同的账号逐个跑，失败的那几个会一直让 CI 变红；用 GitHub Actions 时建议只留 `SSON`。
 
 ## 取 Cookie 的四种方式
 
