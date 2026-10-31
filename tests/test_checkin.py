@@ -135,6 +135,23 @@ class CookieOnlyModeTests(unittest.TestCase):
         self.assertEqual(client.session_key, "")
         self.assertIn("getUserSizeInfo", client.session.calls[1][1])
 
+    def test_check_ip_error_is_explained(self):
+        client = self._client(
+            [
+                FakeResponse(
+                    status_code=400,
+                    payload={"errorCode": "InvalidSessionKey", "errorMsg": "check ip error - curIp=20.1.1.1, cookiesIp=61.1.1.1"},
+                ),
+                FakeResponse(
+                    status_code=400,
+                    payload={"errorCode": "InvalidSessionKey", "errorMsg": "check ip error - curIp=20.1.1.1, cookiesIp=61.1.1.1"},
+                ),
+            ]
+        )
+        with self.assertRaises(AuthError) as ctx:
+            client.login()
+        self.assertIn("绑定 IP", str(ctx.exception))
+
     def test_cookie_only_sign_has_no_session_key(self):
         client = self._client([])
         client.cookie_only = True

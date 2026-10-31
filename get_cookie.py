@@ -47,7 +47,7 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:  # pragma: no cover - 输出被重定向/包裹时忽略
         pass
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 WEB_MAIN = "https://cloud.189.cn/web/main"
 LOGIN_COOKIE_NAMES = ("COOKIE_LOGIN_USER", "COOKIE_LOGIN_USER_SSO")
@@ -119,6 +119,14 @@ def cookie_names(cookie: str) -> set[str]:
 def looks_logged_in(cookie: str) -> bool:
     names = cookie_names(cookie)
     return any(name in names for name in LOGIN_COOKIE_NAMES)
+
+
+def cookie_value(cookie: str, name: str) -> str:
+    for part in cookie.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key.strip() == name:
+            return value.strip()
+    return ""
 
 
 def cookie_preview(cookie: str) -> str:
@@ -723,6 +731,9 @@ def emit_cookie(cookie: str, args: argparse.Namespace, account: str = "") -> int
     if account:
         print(f" 登录账号：{account}")
     print(f" 预览：{cookie_preview(cookie)}")
+    sson = cookie_value(cookie, "SSON")
+    if sson:
+        print(f" 另外检测到 SSON（{mask(sson)}），CI 里也可以改用 Secret SSON")
     if copied:
         print(" 完整 Cookie 已复制到剪贴板 ✅（直接去 GitHub 粘贴即可）")
     else:
@@ -745,6 +756,8 @@ def emit_cookie(cookie: str, args: argparse.Namespace, account: str = "") -> int
     print("   3. Secret 输入框里 Ctrl+V 粘贴，保存")
     print(" 多账号：每个账号跑一次本脚本，把得到的 Cookie 用换行或 # 连起来，")
     print("        一起放进同一个 COOKIE_189（详见 README「多账号」）。")
+    print(" CI 注意：Cookie 绑定获取时的 IP，GitHub Actions 出口 IP 不同会报 check ip error；")
+    print("          CI 请优先用 SSON 或账号口令（先关闭设备锁），详见 README「两个硬限制」。")
     print(" 安全提醒：Cookie 等于账号密码，别发群、别截图、别提交到仓库。")
     return 0
 

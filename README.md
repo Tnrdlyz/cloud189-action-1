@@ -30,7 +30,9 @@
 1. **拿一份 Cookie**：下载 [`bin/get_cookie.exe`](bin/get_cookie.exe) 双击运行，或者 `python get_cookie.py`。
    在弹出的浏览器里登录天翼云盘，脚本会自动把 Cookie 复制到剪贴板。
 2. **配置 Secret**：Fork 或用自己的仓库 → *Settings → Secrets and variables → Actions →
-   New repository secret*，Name 填 `COOKIE_189`，Secret 里 `Ctrl+V` 粘贴，保存。
+   New repository secret*。本地跑填 `COOKIE_189` 最省事；**如果要在 GitHub Actions 上跑，
+   请先看下面的「GitHub Actions 的两个硬限制」——Cookie 绑定 IP，CI 里通常要用 `SSON`
+   或账号口令**。
 3. **先体检再正式跑**：*Actions → 签到 → Run workflow*，勾上 `check` 跑一次登录体检，
    绿了再取消勾选跑正式签到。
 
@@ -51,6 +53,23 @@ COOKIE_189 = COOKIE_LOGIN_USER=xxx; COOKIE_LOGIN_USER_SSO=yyy
 ```bash
 python get_cookie.py --profile "%USERPROFILE%\.cloud189-cookie\account2"
 ```
+
+## 重要：GitHub Actions 的两个硬限制
+
+> **Cookie 会绑定 IP。** 在家/公司浏览器里拿到的 Cookie，云端会记下当时的出口 IP；
+> GitHub Actions 每次的出口 IP 都不一样，签到会直接报
+> `check ip error - curIp=..., cookiesIp=...`。这不是脚本 bug，**换一份 Cookie 也绕不过去**。
+>
+> 想在 GitHub Actions 上跑，按这个优先级选：
+>
+> 1. **`SSON`**：SSO 票据，不绑定浏览器会话 IP。扫码登录 `open.e.189.cn` 后从 Cookie 里取
+>    `SSON` 的值，存成 Secret `SSON`（脚本会用它完成 SSO 握手）；
+> 2. **`USER` + `PWD`**：先在 <https://e.dlife.cn> 的账号安全里**关闭「设备锁」**，
+>    再填账号密码；CI 环境仍可能被图形验证码拦住；
+> 3. **自建 runner / 国内固定 IP 的机器**：在同一网络里取 Cookie 并执行签到，
+>    Cookie 的 IP 绑定就不会冲突。
+>
+> 本地跑（自己的电脑）用 `COOKIE_189` 没问题，绑定的就是本机 IP。
 
 ## 取 Cookie 的四种方式
 
@@ -145,10 +164,17 @@ python get_cookie.py --profile "%USERPROFILE%\.cloud189-cookie\account2"   # 多
 
 复制完可以用 `python get_cookie.py --paste` 让它清洗并校验，比肉眼检查靠谱。
 
-### 方式 4：`SSON`（扫码登录路线）
+### 方式 4：`SSON`（GitHub Actions 上最稳的凭证）
 
-在 `open.e.189.cn` 扫码登录后，从浏览器 Cookie 里取 `SSON` 的值，存成 Secret `SSON`。
-脚本会用它完成 SSO 握手再换 `sessionKey`，适合拿不到 `COOKIE_LOGIN_USER` 的情况。
+`SSON` 是 SSO 票据，不绑定浏览器会话 IP，所以 CI 里也能用。取法：
+
+1. 浏览器打开 <https://open.e.189.cn>，用天翼账号登录（扫码或密码都行）；
+2. `F12` → **Application / 应用** → **Cookies** → 选 `https://open.e.189.cn`；
+3. 找到名为 `SSON` 的那一项，复制它的 **Value**（通常是一长串字符）；
+4. GitHub → *Settings → Secrets → Actions* → New repository secret，Name 填 `SSON`，粘贴保存。
+
+脚本会用 `SSON` 走 `unifyLoginForPC → SSO 握手 → getSessionForPC` 换 `sessionKey`。
+在 `get_cookie` 的输出里如果看到「检测到 SSON」，也可以直接用那一项。
 
 ### 方式 5：`USER` + `PWD`（仅兼容老配置）
 
@@ -157,11 +183,11 @@ python get_cookie.py --profile "%USERPROFILE%\.cloud189-cookie\account2"   # 多
 
 ### 三种凭证怎么选
 
-| 凭证 | 成功率 | 说明 |
+| 凭证 | 适合场景 | 说明 |
 | --- | --- | --- |
-| `COOKIE_189` | 最高 | 推荐。用 `get_cookie` 取，校验通过再存 |
-| `SSON` | 较高 | 扫码登录后取，适合只有 SSON 的情况 |
-| `USER` + `PWD` | 低 | 验证码拦截，仅兼容 |
+| `COOKIE_189` | 本地 / 固定 IP 机器 | 最省事，但**绑定获取时的 IP**；GitHub Actions 上会 `check ip error` |
+| `SSON` | GitHub Actions | SSO 票据，不绑定浏览器会话 IP；扫码登录后取 |
+| `USER` + `PWD` | GitHub Actions（关设备锁） | 可能被图形验证码/设备锁拦截，失败时提示怎么处理 |
 
 ## 本地运行
 
@@ -209,7 +235,8 @@ build_exe.bat
 | `没有配置任何账号` | 三个 secret 都没设 | 至少配 `COOKIE_189` |
 | `登录失败：凭证已失效` / `InvalidSessionKey` | Cookie 过期 | 重新跑 `get_cookie` 取一份 |
 | `Cookie 没有有效登录态…cookieUserSession is null or invalid` | Cookie 不是登录后的完整会话（过期、只复制了一部分、或填了带 `***` 的预览） | 重新跑 `get_cookie`（它会先校验再复制），确认整行粘贴 |
-| `Network is unreachable`（`open.e.189.cn`） | GitHub Actions 出口到登录域不通（常见于 IPv6 无路由或被拦截） | 脚本已默认强制 IPv4；口令登录在 CI 里本来就不可靠，直接改用 `COOKIE_189` |
+| `Network is unreachable`（`open.e.189.cn`） | GitHub Actions 出口到登录域不通（常见于 IPv6 无路由或被拦截） | 脚本已默认强制 IPv4；仍不通就换 `SSON` |
+| `check ip error - curIp=..., cookiesIp=...` | **Cookie 绑定 IP**：GitHub Actions 出口 IP 与取 Cookie 时的 IP 不同 | 无法用代码绕过。改用 `SSON`、账号口令（关设备锁），或自建 runner/固定 IP 机器 |
 | `接口返回登录页（HTML）` | 同上，服务端直接跳登录页 | 同上 |
 | `登录失败：请输入验证码…` | 口令登录被验证码拦截 | 改用 `COOKIE_189` |
 | `登录失败：账户名或密码错误` | 密码确实不对，或天翼云盘已不再接受该账号的网页口令登录 | 先去官网确认密码能不能登网页；能登也报错就直接上 `COOKIE_189` |

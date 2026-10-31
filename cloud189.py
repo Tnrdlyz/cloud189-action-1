@@ -234,6 +234,15 @@ class Cloud189Client:
         try:
             self._verify_web_cookie()
         except Cloud189Error as exc:
+            text = f"{exc} {detail}"
+            if "check ip error" in text.lower():
+                raise AuthError(
+                    "Cookie 是绑定 IP 的：它是在另一个网络（cookiesIp）获取的，"
+                    "当前运行环境出口 IP（curIp）不同，189 直接拒绝复用。"
+                    "这不是脚本能绕过的限制：GitHub Actions 上请改用 SSON 或账号口令"
+                    "（先到 e.dlife.cn 关闭设备锁），或把任务放到固定 IP 的机器上。"
+                    f"（服务器返回：{exc}）"
+                )
             extra = f"；sessionKey 接口返回：{detail}" if detail else ""
             raise AuthError(
                 f"Cookie 没有有效登录态（{exc}{extra}；{self._cookie_summary()}）。"
@@ -365,11 +374,14 @@ class Cloud189Client:
             hint = ""
             text = str(msg)
             if "验证码" in text or "captcha" in text.lower():
-                hint = "（云端要求图形验证码，CI 无法完成，请改用 COOKIE_189）"
+                hint = (
+                    "（云端要求图形验证码，CI 无法完成。可改用 SSON；"
+                    "Cookie 方式在 GitHub Actions 上通常会被 IP 绑定拦住）"
+                )
             elif "账户名或密码" in text or "密码错误" in text:
                 hint = (
-                    "（若确认密码无误：天翼云盘可能已不再接受网页口令登录，"
-                    "或该账号只开通了短信登录；请改用 COOKIE_189）"
+                    "（若确认密码无误：先到 https://e.dlife.cn 关闭「设备锁」再重试；"
+                    "仍不行就改用 SSON。Cookie 在 GitHub Actions 上通常会被 IP 绑定拦住）"
                 )
             raise AuthError(f"{msg}{hint}", code=str(result.get("result")))
         to_url = result.get("toUrl") or ""
