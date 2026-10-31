@@ -285,8 +285,14 @@ class Cloud189Client:
         if str(result.get("result")) not in ("0", "None"):
             msg = result.get("msg") or "登录失败"
             hint = ""
-            if "验证码" in str(msg) or "captcha" in str(msg).lower():
+            text = str(msg)
+            if "验证码" in text or "captcha" in text.lower():
                 hint = "（云端要求图形验证码，CI 无法完成，请改用 COOKIE_189）"
+            elif "账户名或密码" in text or "密码错误" in text:
+                hint = (
+                    "（若确认密码无误：天翼云盘可能已不再接受网页口令登录，"
+                    "或该账号只开通了短信登录；请改用 COOKIE_189）"
+                )
             raise AuthError(f"{msg}{hint}", code=str(result.get("result")))
         to_url = result.get("toUrl") or ""
         if not to_url:

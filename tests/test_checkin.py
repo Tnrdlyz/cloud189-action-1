@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import unittest
@@ -233,9 +235,19 @@ class ReportTests(unittest.TestCase):
 
 
 class ExitCodeTests(unittest.TestCase):
+    def setUp(self):
+        # main() 会往 stdout 打印报告，单测里收起来，免得污染 CI 日志
+        self._stdout = io.StringIO()
+        self._redirect = contextlib.redirect_stdout(self._stdout)
+        self._redirect.__enter__()
+
+    def tearDown(self):
+        self._redirect.__exit__(None, None, None)
+
     def test_no_accounts_returns_2(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(checkin.main(["--no-notify"]), 2)
+        self.assertIn("没有配置任何账号", self._stdout.getvalue())
 
     def test_all_failed_returns_1(self):
         env = {"COOKIE_189": "a=b", "PYTHONUNBUFFERED": "1"}

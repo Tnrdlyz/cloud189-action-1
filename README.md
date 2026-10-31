@@ -93,6 +93,7 @@ python -m unittest discover -s tests -v
 | `登录失败：凭证已失效` / `InvalidSessionKey` | Cookie 过期 | 重新复制 `COOKIE_189` |
 | `接口返回登录页（HTML）` | 同上，服务端直接跳登录页 | 同上 |
 | `登录失败：请输入验证码…` | 口令登录被验证码拦截 | 改用 `COOKIE_189` |
+| `登录失败：账户名或密码错误` | 密码确实不对，或天翼云盘已不再接受该账号的网页口令登录 | 先去官网确认密码能不能登网页；能登也报错就直接上 `COOKIE_189` |
 | workflow 一直不触发 | 仓库 60 天无提交，GitHub 停用了 schedule | Actions 页点 `Enable`，或手动 `Run workflow`；`保活` 工作流会预防这个问题 |
 | `Actions` 里没有「签到」 | fork 后默认没有启用 | 点 *I understand my workflows, go ahead and enable them* |
 
