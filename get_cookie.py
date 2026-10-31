@@ -718,9 +718,15 @@ def emit_cookie(cookie: str, args: argparse.Namespace, account: str = "") -> int
         print(f" 登录账号：{account}")
     print(f" 预览：{cookie_preview(cookie)}")
     if copied:
-        print(" 完整 Cookie 已复制到剪贴板 ✅")
+        print(" 完整 Cookie 已复制到剪贴板 ✅（直接去 GitHub 粘贴即可）")
     else:
-        print(" 剪贴板不可用，完整 Cookie 见下方（或加 --show 重新查看）")
+        print(" ⚠️ 剪贴板不可用，完整 Cookie 已在下方打印；")
+        print("    可以右键控制台 →「标记」，选中 Cookie 后按回车复制。")
+        if not args.out and not args.no_clipboard:
+            fallback = Path.cwd() / "cookie_COOKIE_189.txt"
+            if _write_out(str(fallback), cookie):
+                print(f"    另外已保存到文件：{fallback}")
+                print("    （复制完请删除该文件，里面就是你的账号凭证）")
     if args.show or not copied:
         print()
         print(cookie)
@@ -813,6 +819,26 @@ def run_auto(args: argparse.Namespace) -> int:
     return emit_cookie(cookie, args, account)
 
 
+def wait_for_exit(args: argparse.Namespace) -> None:
+    """双击运行时停在最后，给用户留出复制 Cookie 的时间。
+
+    只在“控制台交互”时暂停：管道/重定向/CI 不会被卡住；--no-pause 可关闭。
+    """
+    if getattr(args, "no_pause", False):
+        return
+    try:
+        if not (sys.stdin and sys.stdin.isatty()):
+            return
+        if not (sys.stdout and sys.stdout.isatty()):
+            return
+    except (ValueError, OSError):
+        return
+    try:
+        input("按回车键退出（先复制上面的 Cookie）… ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="get_cookie",
@@ -836,6 +862,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default="", help="把 Cookie 写入指定文件（方便本地留存）")
     parser.add_argument("--keep-browser", action="store_true", help="提取完成后保留浏览器窗口")
     parser.add_argument("--force", action="store_true", help="校验失败也照样输出 Cookie")
+    parser.add_argument("--no-pause", action="store_true", help="结束后不停留（脚本/自动化用；默认在控制台里等你按回车）")
     parser.add_argument("--debug", action="store_true", help="打印调试信息")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -843,10 +870,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.timeout <= 0:
-        print(" --timeout 必须是正数")
-        return 2
     try:
+        if args.timeout <= 0:
+            print(" --timeout 必须是正数")
+            return 2
         if args.paste:
             return run_paste(args)
         return run_auto(args)
@@ -876,6 +903,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n ❌ 出错了：{exc.__class__.__name__}: {exc}")
         print(" 可以加 --debug 查看详细信息；或改用 --paste 手动模式。")
         return 1
+    finally:
+        wait_for_exit(args)
 
 
 if __name__ == "__main__":

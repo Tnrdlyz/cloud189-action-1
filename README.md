@@ -69,8 +69,13 @@ python get_cookie.py --profile "%USERPROFILE%\.cloud189-cookie\account2"
 4. 在窗口里正常登录：手机号+密码、短信、扫码都行；
 5. 登录成功后脚本会自动检测到，验证 Cookie 是否真的能登录，然后把完整 Cookie
    复制到剪贴板，并在命令行里打印（打码后的）预览；
-6. 去 GitHub：*Settings → Secrets and variables → Actions → New repository secret*，
+6. 命令行最后会停在 **`按回车键退出`**，窗口不会一闪而过；先把 Cookie 复制好，
+   再按回车关闭；
+7. 去 GitHub：*Settings → Secrets and variables → Actions → New repository secret*，
    Name 填 `COOKIE_189`，Secret 框里 `Ctrl+V`，保存。
+
+> 如果剪贴板被远程桌面/安全软件占用，脚本会打印完整 Cookie，并自动保存一份
+> `cookie_COOKIE_189.txt` 到 exe 所在目录；从文件里复制即可，**复制完删掉这个文件**。
 
 脚本会使用 `%LOCALAPPDATA%\cloud189-cookie\profile` 作为独立浏览器配置目录，
 所以下次再运行通常还是登录状态，直接秒出 Cookie；过期后重跑并重新登录即可。
@@ -105,6 +110,7 @@ python get_cookie.py --profile "%USERPROFILE%\.cloud189-cookie\account2"   # 多
 | `--browser` | `auto` / `edge` / `chrome` / `brave` / `chromium`，或浏览器 exe 的完整路径 |
 | `--profile` | 自定义浏览器配置目录（多账号就靠它区分） |
 | `--keep-browser` | 提取完成后不关闭浏览器窗口 |
+| `--no-pause` | 结束后不停留（脚本/CI 用；默认在控制台里等你按回车） |
 
 脚本原理：用 Chromium 的 DevTools 协议读取“浏览器自己会发给 `cloud.189.cn` 的 Cookie”，
 不导出密码、不读浏览历史，也不需要破解 Chrome/Edge 新版 Cookie 加密。
@@ -206,6 +212,8 @@ build_exe.bat
 | `登录失败：请输入验证码…` | 口令登录被验证码拦截 | 改用 `COOKIE_189` |
 | `登录失败：账户名或密码错误` | 密码确实不对，或天翼云盘已不再接受该账号的网页口令登录 | 先去官网确认密码能不能登网页；能登也报错就直接上 `COOKIE_189` |
 | 双击 exe 没反应 / 被 SmartScreen 拦 | exe 无代码签名 | 点「更多信息 → 仍要运行」；或改用 `python get_cookie.py` |
+| 窗口一闪而过，来不及复制 | 极少数环境 `isatty` 判定异常 | 用 `cmd` 运行 `get_cookie.exe`；或加 `--out cookie.txt` 保存到文件 |
+| 剪贴板不可用 / 复制不出来 | 远程桌面、剪贴板被占用 | 从脚本打印的完整 Cookie 或 `cookie_COOKIE_189.txt` 里复制 |
 | exe 报 `Could not create temporary directory` | 所在目录不可写 / 临时目录被策略限制 | 把 exe 放到 `下载`、桌面等可写目录再运行；或改用 Python 脚本 |
 | `没找到可用的 Chromium 内核浏览器` | 没装 Edge/Chrome，或装在非标准路径 | 装一个 Edge；或 `--browser` 指定 exe 完整路径 |
 | `DevTools 端口没有打开` | 公司策略禁用调试端口 | 改用 `python get_cookie.py --paste` 手动模式 |
